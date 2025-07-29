@@ -27,7 +27,7 @@ SELECT
 		(COUNT(*) >= 6.0 AND country = 'TR') OR 
 		(COUNT(*) >= 20.0 AND country = 'CN') OR 
 		(COUNT(*) >= 30.0 AND country = 'SE') OR 
-		(COUNT(*) >= 10.0 AND country NOT IN ('TR','CN','SE'))
+		(COUNT(*) >= 10.0 AND country NOT IN ('TR', 'CN', 'SE'))
 ) GROUP BY
 	client_ip, country, uri
 ORDER BY

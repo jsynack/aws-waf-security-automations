@@ -6,15 +6,19 @@ from os import getenv
 
 from stack_requirements import StackRequirements
 from lib.cfn_response import send_response
-from aws_lambda_powertools import Logger
+from aws_lambda_powertools import Logger, Tracer
+    
 
 logger = Logger(
     level=getenv('LOG_LEVEL')
 )
+tracer = Tracer()
 
 # ======================================================================================================================
 # Lambda Entry Point
 # ======================================================================================================================
+@tracer.capture_lambda_handler
+@logger.inject_lambda_context(log_event=True)
 def lambda_handler(event, context):
     response_status = 'SUCCESS'
     reason = None

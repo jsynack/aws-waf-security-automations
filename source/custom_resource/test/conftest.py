@@ -74,7 +74,6 @@ def configure_cloud_watch_group_retention_event():
         'RequestType': 'Create',
         'ResourceProperties': {   
             'AddAthenaPartitionsLambdaName': 'wafohio-AddAthenaPartitions-ECWYudO8kRMS',
-            'BadBotParserLambdaName': 'wafohio-BadBotParser-rperXcaWortz',
             'CustomResourceLambdaName': 'wafohio-CustomResource-WnfNLnBqtXPF',
             'CustomTimerLambdaName': 'wafohio-WebACLStack-1218MNWFWK1BN-CustomTimer-FTgDc0Lar0fj',
             'HelperLambdaName': 'wafohio-Helper-QC0crJu0nSgs',
@@ -247,7 +246,9 @@ def configure_aws_waf_logs_create_event():
         'ResourceProperties': {
             'DeliveryStreamArn': 'arn:aws:firehose:us-east-2:XXXXXXXXXXXX:deliverystream/aws-waf-logs-wafohio_xToOQk',
             'ServiceToken': 'arn:aws:lambda:us-east-2:XXXXXXXXXXXX:function:wafohio-CustomResource-WnfNLnBqtXPF',
-            'WAFWebACLArn': 'arn:aws:wafv2:us-east-2:XXXXXXXXXXXX:regional/webacl/wafohio/c2e77a1b-6bb3-4d9d-86f9-0bfd9b6fdcaf'
+            'WAFWebACLArn': 'arn:aws:wafv2:us-east-2:XXXXXXXXXXXX:regional/webacl/wafohio/c2e77a1b-6bb3-4d9d-86f9-0bfd9b6fdcaf',
+            'IsBadBotOnlyWAFLogs' : 'false',
+            'BadBotWafLogLabel': 'badbot'
             },
         'ResourceType': 'Custom::ConfigureAWSWAFLogs',
         'ResponseURL': 'https://cloudformation-custom-resource-response-useast2.s3.us-east-2.amazonaws.com/',
@@ -264,7 +265,9 @@ def configure_aws_waf_logs_update_event():
         'ResourceProperties': {
             'DeliveryStreamArn': 'arn:aws:firehose:us-east-2:XXXXXXXXXXXX:deliverystream/aws-waf-logs-wafohio_xToOQk',
             'ServiceToken': 'arn:aws:lambda:us-east-2:XXXXXXXXXXXX:function:wafohio-CustomResource-WnfNLnBqtXPF',
-            'WAFWebACLArn': 'arn:aws:wafv2:us-east-2:XXXXXXXXXXXX:regional/webacl/wafohio/c2e77a1b-6bb3-4d9d-86f9-0bfd9b6fdcaf'
+            'WAFWebACLArn': 'arn:aws:wafv2:us-east-2:XXXXXXXXXXXX:regional/webacl/wafohio/c2e77a1b-6bb3-4d9d-86f9-0bfd9b6fdcaf',
+            'IsBadBotOnlyWAFLogs' : 'true',
+            'BadBotWafLogLabel': 'badbot'
             },
         'ResourceType': 'Custom::ConfigureAWSWAFLogs',
         'ResponseURL': 'https://cloudformation-custom-resource-response-useast2.s3.us-east-2.amazonaws.com/',
@@ -281,7 +284,9 @@ def configure_aws_waf_logs_delete_event():
         'ResourceProperties': {
             'DeliveryStreamArn': 'arn:aws:firehose:us-east-2:XXXXXXXXXXXX:deliverystream/aws-waf-logs-wafohio_xToOQk',
             'ServiceToken': 'arn:aws:lambda:us-east-2:XXXXXXXXXXXX:function:wafohio-CustomResource-WnfNLnBqtXPF',
-            'WAFWebACLArn': 'arn:aws:wafv2:us-east-2:XXXXXXXXXXXX:regional/webacl/wafohio/c2e77a1b-6bb3-4d9d-86f9-0bfd9b6fdcaf'
+            'WAFWebACLArn': 'arn:aws:wafv2:us-east-2:XXXXXXXXXXXX:regional/webacl/wafohio/c2e77a1b-6bb3-4d9d-86f9-0bfd9b6fdcaf',
+            'IsBadBotOnlyWAFLogs' : 'true',
+            'BadBotWafLogLabel': 'badbot'
             },
         'ResourceType': 'Custom::ConfigureAWSWAFLogs',
         'ResponseURL': 'https://cloudformation-custom-resource-response-useast2.s3.us-east-2.amazonaws.com/',
@@ -321,7 +326,6 @@ def configure_web_acl_delete():
                                                     'log '
                                                     'parser',
             'ActivateSqlInjectionProtectionParam': 'yes',
-            'ApiGatewayBadBotCWRoleParam': 'no',
             'AppAccessLogBucketLoggingStatusParam': 'yes',
             'AthenaQueryRunTimeScheduleParam': '5',
             'ErrorThreshold': '50',
@@ -380,6 +384,7 @@ def configure_waf_log_bucket_create_event():
         'ResourceProperties': {
             'HttpFloodAthenaLogParser': 'yes',
             'HttpFloodLambdaLogParser': 'no',
+            'BadBotLambdaLogParser': 'no',
             'LogParser': 'arn:aws:lambda:us-east-2:XXXXXXXXXXXX:function:wafohio-LogParser-jjx2HJSF27ji',
             'ServiceToken': 'arn:aws:lambda:us-east-2:XXXXXXXXXXXX:function:wafohio-CustomResource-WnfNLnBqtXPF',
             'WafLogBucket': 'wafohio-waflogbucket-l1a9qllrsfv4'

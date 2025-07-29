@@ -30,7 +30,8 @@ def test_get_params_waf_event():
             'WafLogBucket': 'WafLogBucket',
             'LogParser': 'LogParser',
             'HttpFloodLambdaLogParser': 'no',
-            'HttpFloodAthenaLogParser': 'yes'
+            'HttpFloodAthenaLogParser': 'yes',
+            'BadBotLambdaLogParser': 'no'
         }
     }
     expected = {
@@ -52,6 +53,7 @@ def test_get_params_waf_event():
         'ResourceProperties': {   
             'HttpFloodAthenaLogParser': 'yes',
             'HttpFloodLambdaLogParser': 'no',
+            'BadBotLambdaLogParser': 'no',
             'LogParser': 'arn:aws:lambda:eu-south-1:XXXXXXXXXXXX:function:wafmilan419115-LogParser-zouewUuDjyQU',
             'ServiceToken': 'arn:aws:lambda:eu-south-1:XXXXXXXXXXXX:function:wafmilan419115-CustomResource-VPiXt5B9MPb3',
             'WafLogBucket': 'wafmilan419115-waflogbucket-9qpon138lt2l'
@@ -190,12 +192,14 @@ def test_waf_has_old_resources():
             'LogParser': 'LogParser',
             'HttpFloodLambdaLogParser': 'no',
             'HttpFloodAthenaLogParser': 'yes',
+            'BadBotLambdaLogParser': 'no',
             'WafLogBucket': 'WafLogBucket'
         },
         'OldResourceProperties': {
             'LogParser': 'LogParser',
             'HttpFloodLambdaLogParser': 'no',
             'HttpFloodAthenaLogParser': 'yes',
+            'BadBotLambdaLogParser': 'no',
             'WafLogBucket': 'WafLogBucket'
         }
     }

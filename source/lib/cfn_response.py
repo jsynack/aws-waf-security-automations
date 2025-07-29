@@ -1,69 +1,74 @@
-######################################################################################################################
-#  Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.                                                #
-#                                                                                                                    #
-#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
-#  with the License. A copy of the License is located at                                                             #
-#                                                                                                                    #
-#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
-#                                                                                                                    #
-#  or in the "license" file accompanying this file. This file is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES #
-#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
-#  and limitations under the License.                                                                                #
-######################################################################################################################
-# !/bin/python
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
 
-import requests
 import json
+import urllib.request
+import urllib.error
+
+
+def get_cloudwatch_logs_url(context):
+    region = context.invoked_function_arn.split(':')[3]
+    return f"https://console.aws.amazon.com/cloudwatch/home?region={region}#logEventViewer:group={context.log_group_name};stream={context.log_stream_name}"
+
+
+def build_response_body(event, context, response_status, response_data, resource_id, reason=None):
+    cw_logs_url = get_cloudwatch_logs_url(context)   
+    return {
+        'Status': response_status,
+        'Reason': reason or f'See the details in CloudWatch Logs: {cw_logs_url}',
+        'PhysicalResourceId': resource_id,
+        'StackId': event['StackId'],
+        'RequestId': event['RequestId'],
+        'LogicalResourceId': event['LogicalResourceId'],
+        'NoEcho': False,
+        'Data': response_data
+    }
+
+
+def send_http_request(log, response_url, json_body):
+    log.info(f"[send_http_request] Sending cfn response to URL: {response_url}")
+    headers = {
+        'Content-Type': '',
+        'Content-Length': str(len(json_body))
+    }
+    try:
+        req = urllib.request.Request(
+            url=response_url,
+            data=json_body.encode('utf-8'),
+            method='PUT'
+        )
+
+        for key, value in headers.items():
+            req.add_header(key, value)
+            
+        with urllib.request.urlopen(req, timeout=10) as response:
+            log.info(f"[send_http_request] Response status code: {response.status}, reason: {response.reason}")
+    except urllib.error.URLError as error:
+        log.error("[send_http_request] Failed executing urllib request")
+        log.error(str(error))
+    except Exception as error:
+        log.error("[send_http_request] Unexpected error")
+        log.error(str(error))
+
 
 def send_response(log, event, context, response_status, response_data, resource_id, reason=None):
     """
     Send a response to an AWS CloudFormation custom resource.
-        Parameters:
-           event: The fields in a custom resource request
-           context: An object, specific to Lambda functions, that you can use to specify 
-                    when the function and any callbacks have completed execution, or to 
-                    access information from within the Lambda execution environment
-           response_status: Whether the function successfully completed - SUCCESS or FAILED
-           response_data: The Data field of a custom resource response object
-           resource_id: The id of the custom resource that invoked the function
-           reason: The error message if the function fails
-
-        Returns: None
+    
+    Parameters:
+       log: Logger object for logging messages
+       event: The fields in a custom resource request
+       context: Lambda execution context
+       response_status: Whether the function successfully completed - SUCCESS or FAILED
+       response_data: The Data field of a custom resource response object
+       resource_id: The id of the custom resource that invoked the function
+       reason: The error message if the function fails
     """
+
     log.debug("[send_response] Start")
-
-    responseUrl = event['ResponseURL']
-    cw_logs_url = "https://console.aws.amazon.com/cloudwatch/home?region=%s#logEventViewer:group=%s;stream=%s" % (
-        context.invoked_function_arn.split(':')[3], context.log_group_name, context.log_stream_name)
-
-    log.info("[send_response] Sending cfn response url: %s", responseUrl)
-    responseBody = {}
-    responseBody['Status'] = response_status
-    responseBody['Reason'] = reason or ('See the details in CloudWatch Logs: ' + cw_logs_url)
-    responseBody['PhysicalResourceId'] = resource_id
-    responseBody['StackId'] = event['StackId']
-    responseBody['RequestId'] = event['RequestId']
-    responseBody['LogicalResourceId'] = event['LogicalResourceId']
-    responseBody['NoEcho'] = False
-    responseBody['Data'] = response_data
-
-    json_responseBody = json.dumps(responseBody)
-    log.debug("Response body:\n" + json_responseBody)
-
-    headers = {
-        'content-type': '',
-        'content-length': str(len(json_responseBody))
-    }
-
-    try:
-        response = requests.put(responseUrl,
-                                data=json_responseBody,
-                                headers=headers,
-                                timeout=10)
-        log.info("[send_response] Sending cfn response status code: %s", response.reason)
-
-    except Exception as error:
-        log.error("[send_response] Failed executing requests.put(..)")
-        log.error(str(error))
-
+    response_url = event['ResponseURL']
+    response_body = build_response_body(event, context, response_status, response_data, resource_id, reason)
+    json_body = json.dumps(response_body)
+    log.debug(f"Response body:\n{json_body}")
+    send_http_request(log, response_url, json_body)
     log.debug("[send_response] End")

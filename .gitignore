@@ -5,6 +5,7 @@
 **/package
 **/package-lock.json
 **/.pyc
+**/staging
 /deployment/open-source/
 source/tests/__pycache__/
 source/log_parser/__pycache__/
@@ -21,6 +22,7 @@ source/**/__pycache__
 source/**/.venv**
 source/**/test/__pycache__
 source/**/test/.pytest**
+source/**/AmazonQ.md
 
 # IDE specific config files
 .idea/
@@ -52,9 +54,16 @@ s3transfer*
 six*
 urllib*
 
-# Ignore lib folder within each lambada folder. Only include lib folder at upper level
+# Ignore lib folder within each lambda folder. Only include lib folder at upper level
 /source/**/lib
 !/source/lib
 
 # Build script output from 'poetry export'
 requirements.txt
+
+#CDK
+!source/infrastructure/bin
+!source/infrastructure/lib
+!source/infrastructure/package-lock.json
+
+!package-lock.json

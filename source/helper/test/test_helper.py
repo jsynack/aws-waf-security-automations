@@ -13,6 +13,7 @@
 
 from helper.helper import lambda_handler
 
+
 def test_check_requirements(check_requirements_event, example_context, successful_response):
     result = lambda_handler(check_requirements_event, example_context)
     expected = successful_response

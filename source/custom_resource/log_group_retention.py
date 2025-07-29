@@ -50,7 +50,6 @@ class LogGroupRetention:
             'SetIPRetentionLambdaName',
             'RemoveExpiredIPLambdaName',
             'ReputationListsParserLambdaName',
-            'BadBotParserLambdaName',
             'HelperLambdaName',
             'LogParserLambdaName',
             'CustomTimerLambdaName'

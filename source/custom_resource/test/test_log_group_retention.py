@@ -56,7 +56,6 @@ def test_get_lambda_names():
         'SetIPRetentionLambdaName': 'TESTSetIPRetentionLambdaName',
         'RemoveExpiredIPLambdaName': 'TESTRemoveExpiredIPLambdaName',
         'ReputationListsParserLambdaName': 'TESTReputationListsParserLambdaName',
-        'BadBotParserLambdaName': 'TESTBadBotParserLambdaName',
         'CustomResourceLambdaName': 'TESTCustomResourceLambdaName',
         'CustomTimerLambdaName': 'TESTCustomTimerLambdaName',
         'RandomProp': 'TESTRandomProp'
@@ -68,7 +67,6 @@ def test_get_lambda_names():
         '/aws/lambda/TESTSetIPRetentionLambdaName',
         '/aws/lambda/TESTRemoveExpiredIPLambdaName',
         '/aws/lambda/TESTReputationListsParserLambdaName',
-        '/aws/lambda/TESTBadBotParserLambdaName',
         '/aws/lambda/TESTCustomResourceLambdaName',
         '/aws/lambda/TESTCustomTimerLambdaName'
     }

@@ -17,12 +17,12 @@ from operations import (
     add_athena_partitions
 )
 from operations.operation_types import RESOURCE_TYPE
-from aws_lambda_powertools import Logger
+from aws_lambda_powertools import Logger, Tracer
 
 logger = Logger(
     level=getenv('LOG_LEVEL')
 )
-
+tracer = Tracer()
 
 operations_dictionary = {
     operation_types.SET_CLOUDWATCH_LOGGROUP_RETENTION: set_log_group_retention.execute,
@@ -49,7 +49,8 @@ def get_function_for_resource(resource, log):
 # ======================================================================================================================
 # Lambda Entry Point
 # ======================================================================================================================
-@logger.inject_lambda_context
+@tracer.capture_lambda_handler
+@logger.inject_lambda_context(log_event=True)
 def lambda_handler(event, context):
     response_status = 'SUCCESS'
     reason = None

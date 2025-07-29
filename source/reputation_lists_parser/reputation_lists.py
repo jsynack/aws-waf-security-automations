@@ -2,28 +2,40 @@
 #  SPDX-License-Identifier: Apache-2.0
 
 import os
-import requests
+import urllib.request
 import json
 import re
+import ssl
+from urllib.parse import urlparse
 from time import sleep
 from ipaddress import ip_address
 from ipaddress import ip_network
 from ipaddress import IPv4Network
 from ipaddress import IPv6Network
-from os import environ
-from lib.solution_metrics import send_metrics
 from lib.waflibv2 import WAFLIBv2
 from lib.cfn_response import send_response
-from lib.cw_metrics_util import WAFCloudWatchMetrics
-from aws_lambda_powertools import Logger
+from aws_lambda_powertools import Logger, Tracer
 
 logger = Logger(
     level=os.getenv('LOG_LEVEL')
 )
+tracer = Tracer()
 waflib = WAFLIBv2()
 
 delay_between_updates = 5
-CW_METRIC_PERIOD_SECONDS = 3600    # One hour in seconds
+
+HTTPS = 'https'
+
+TRUSTED_DOMAINS = [
+    'rules.emergingthreats.net',
+    'check.torproject.org',
+    'spamhaus.org'
+]
+
+ALLOWED_CONTENT_TYPES = [
+    'text/plain',
+    'text/csv'
+]
 
 # Find matching ip address ranges from a line
 def find_ips(line, prefix=""):
@@ -35,24 +47,23 @@ def find_ips(line, prefix=""):
 # Read each address from source URL
 def read_url_list(log, current_list, url, prefix=""):
     try:
-        log.info("[read_url_list]reading url " + url)
-        response = requests.get(url, timeout=30)
-        new_ip_count = 0
-        line_count = 0
-        current_ip_count = len(current_list)
-
-        # Proceed if request returns success code 200
-        if response.status_code == 200:
-            for line in response.iter_lines():
-                decoded_line = line.decode("utf-8").strip()  # remove spaces on either end of string
-                line_count = line_count + 1
-                new_ips = find_ips(decoded_line, prefix)
-                current_list = list(set(current_list) | set(new_ips))
-                new_ip_count = new_ip_count + len(new_ips)
+        log.info(f"[read_url_list]reading url {url}")
+        initial_count = len(current_list)
         
-        log.info("[read_url_list]"+ str(new_ip_count) + " ip address ranges read from " + url + "; " + str(line_count) + " lines")
-        log.info("[read_url_list]number of new ip address ranges added to current list: " + str(len(current_list) - current_ip_count)
-                + "; total number of ip address ranges on curent list: " + str(len(current_list)))
+        if not is_url_valid(url):
+            return current_list
+
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=30, context=ssl.create_default_context()) as response:
+            if not is_response_valid(response) or response.status != 200:
+                return current_list
+
+            for line in response:
+                new_ips = find_ips(line.decode("utf-8").strip(), prefix)
+                current_list = list(set(current_list) | set(new_ips))
+        
+        added_count = len(current_list) - initial_count
+        log.info(f"[read_url_list]{url}: added {added_count} IPs, total: {len(current_list)}")
     except Exception as e:
         log.error(e)
 
@@ -94,125 +105,55 @@ def populate_ipsets(log, scope, ipset_name_v4, ipset_name_v6, ipset_arn_v4, ipse
         except Exception as e:
             log.error(e)
 
+    log.info("[populate_ipsets] Changes in WAF IP set v4")
     waflib.update_ip_set(log, scope, ipset_name_v4, ipset_arn_v4, addresses_v4)
-    ipset = waflib.get_ip_set(log, scope, ipset_name_v4, ipset_arn_v4)
-
-    log.info(ipset)
-    log.info("There are %d IP addresses in IPSet %s", len(ipset["IPSet"]["Addresses"]), ipset_name_v4)
+    log.info("[populate_ipsets] Updated IPSet %s with %d IP addresses v4", ipset_name_v4, len(addresses_v4))
 
     # Sleep for a few seconds to mitigate AWS WAF Update API call throttling issue
     sleep(delay_between_updates)
 
+    log.info("[populate_ipsets] Changes in WAF IP set v6")
     waflib.update_ip_set(log, scope, ipset_name_v6, ipset_arn_v6, addresses_v6)
-    ipset = waflib.get_ip_set(log, scope, ipset_name_v6, ipset_arn_v6)
-
-    log.info(ipset)
-    log.info("There are %d IP addresses in IPSet %s", len(ipset["IPSet"]["Addresses"]), ipset_name_v6)
+    log.info("[populate_ipsets] Updated IPSet %s with %d IP addresses v6", ipset_name_v6, len(addresses_v6))
 
 
-def initialize_usage_data():
-    usage_data = {
-        "data_type": "reputation_lists",
-        "ipv4_reputation_lists_size": 0,
-        "ipv4_reputation_lists": 0,
-        "ipv6_reputation_lists_size": 0,
-        "ipv6_reputation_lists": 0,
-        "allowed_requests": 0,
-        "blocked_requests": 0,
-        "blocked_requests_ip_reputation_lists": 0,
-        "waf_type": os.getenv('LOG_TYPE'),
-        "provisioner": os.getenv('provisioner') if "provisioner" in environ else "cfn"
-    }
-    return usage_data
+def is_scheme_valid(parsed_url):
+    """Check if URL scheme is HTTPS."""
+    return parsed_url.scheme == HTTPS
 
+def is_domain_trusted(domain):
+    """Check if domain is in trusted domains list."""
+    return any(domain.endswith(trusted_domain) for trusted_domain in TRUSTED_DOMAINS)
 
-def get_ip_reputation_usage_data(log, scope, ipset_name,
-                                ipset_arn, usage_data,
-                                usage_data_ip_list_size_field,
-                                usage_data_ip_list_field):
-    log.info("[get_ip_reputation_usage_data] Get size of %s", ipset_name)
-
-    # Get ip reputation ipv4 and ipv6 lists
-    if 'IP_SET_ID_REPUTATIONV4' in environ or 'IP_SET_ID_REPUTATIONV6' in environ:
-        response = waflib.get_ip_set(log, scope, ipset_name, ipset_arn)
-
-        if response is not None:
-            usage_data[usage_data_ip_list_size_field] = len(response['IPSet']['Addresses'])
-            usage_data[usage_data_ip_list_field] = response['IPSet']['Addresses']
-    return usage_data
-
-
-def send_anonymized_usage_data(log, scope):
+def is_url_valid(url):
+    """Check if URL scheme and domain are trusted."""
     try:
-        if 'SEND_ANONYMIZED_USAGE_DATA' not in os.environ or os.getenv('SEND_ANONYMIZED_USAGE_DATA').lower() != 'yes':
-            return
+        parsed_url = urlparse(url)
+        domain = parsed_url.netloc
+        return is_scheme_valid(parsed_url) and is_domain_trusted(domain)
+    except Exception as e:
+        logger.error(f"URL validation error: {str(e)}")
+        return False
 
-        log.debug("[send_anonymized_usage_data] Start")
-        cw = WAFCloudWatchMetrics(log)
-        usage_data = initialize_usage_data()
+def validate_content_type(response):
+    """Check if the response has a valid Content-Type header."""
+    content_type = response.headers.get('Content-Type', '').split(';')[0]
+    return content_type and content_type in ALLOWED_CONTENT_TYPES
 
-        usage_data = get_ip_reputation_usage_data(
-            log, scope,
-            os.getenv('IP_SET_NAME_REPUTATIONV4'),
-            os.getenv('IP_SET_ID_REPUTATIONV4'),
-            usage_data,
-            'ipv4_reputation_lists_size',
-            'ipv4_reputation_lists'
-        )
-        
-        usage_data = get_ip_reputation_usage_data(
-            log, scope,
-            os.getenv('IP_SET_NAME_REPUTATIONV6'),
-            os.getenv('IP_SET_ID_REPUTATIONV6'),
-            usage_data,
-            'ipv6_reputation_lists_size',
-            'ipv6_reputation_lists'
-        )
+def has_nosniff_header(response):
+    """Check if the response has X-Content-Type-Options: nosniff header."""
+    x_content_type = response.headers.get('X-Content-Type-Options', '').lower()
+    return x_content_type == 'nosniff'
 
-        # Get the count of allowed requests for all the waf rules from cloudwatch metrics
-        usage_data = cw.add_waf_cw_metric_to_usage_data(
-            'AllowedRequests',
-            CW_METRIC_PERIOD_SECONDS,
-            'ALL',
-            usage_data,
-            'allowed_requests',
-            0
-        )
-
-        # Get the count of blocked requests for all the waf rules from cloudwatch metrics
-        usage_data = cw.add_waf_cw_metric_to_usage_data(
-            'BlockedRequests',
-            CW_METRIC_PERIOD_SECONDS,
-            'ALL',
-            usage_data,
-            'blocked_requests',
-            0
-        )
-
-        # Get the count of blocked requests for the Reputation Lists Rule from cloudwatch metrics
-        usage_data = cw.add_waf_cw_metric_to_usage_data(
-            'BlockedRequests',
-            CW_METRIC_PERIOD_SECONDS,
-            os.getenv('IPREPUTATIONLIST_METRICNAME'),
-            usage_data,
-            'blocked_requests_ip_reputation_lists',
-            0
-        )
-
-        # Send usage data
-        log.info('[send_anonymized_usage_data] Send usage data: \n{}'.format(usage_data))
-        response = send_metrics(data=usage_data)
-        response_code = response.status_code
-        log.debug('[send_anonymized_usage_data] Response Code: {}'.format(response_code))
-        log.debug("[send_anonymized_usage_data] End")
-    except Exception:
-        log.debug("[send_anonymized_usage_data] Failed to send data")
-
+def is_response_valid(response):
+    """Check if response has valid headers."""
+    return validate_content_type(response) or has_nosniff_header(response)
 
 # ======================================================================================================================
 # Lambda Entry Point
 # ======================================================================================================================
-@logger.inject_lambda_context
+@tracer.capture_lambda_handler
+@logger.inject_lambda_context(log_event=True)
 def lambda_handler(event, context):
     logger.info('[lambda_handler] Start')
 
@@ -260,7 +201,6 @@ def lambda_handler(event, context):
         current_list = process_url_list(logger, current_list)
 
         populate_ipsets(logger, scope, ipset_name_v4, ipset_name_v6, ipset_arn_v4, ipset_arn_v6, current_list)
-        send_anonymized_usage_data(logger, scope)
 
     except Exception as error:
         logger.error(str(error))

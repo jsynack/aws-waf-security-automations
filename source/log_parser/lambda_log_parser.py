@@ -15,13 +15,13 @@ import gzip
 import json
 import datetime
 import os
+import tempfile
 from os import remove
 from time import sleep
 from urllib.parse import urlparse
 from lib.waflibv2 import WAFLIBv2
 from lib.s3_util import S3
 
-TMP_DIR = '/tmp/' #NOSONAR tmp use for an insensitive workspace
 FORMAT_DATE_TIME = "%Y-%m-%d %H:%M:%S %Z%z"
 
 class LambdaLogParser(object):
@@ -67,31 +67,34 @@ class LambdaLogParser(object):
 
         request_key = datetime.datetime.fromtimestamp(int(line_data['timestamp']) / 1000.0).isoformat(
             sep='T', timespec='minutes')
-        request_key += ' ' + line_data['httpRequest']['clientIp']
+        ip = line_data['httpRequest']['clientIp']
+        request_key += ' ' + ip
         uri = urlparse(line_data['httpRequest']['uri']).path
 
-        return  request_key, uri, line_data
+        return request_key, uri, ip, line_data
     
 
     def read_alb_log_file(self, line): 
         line_data = line.split(self.line_format_alb['delimiter'])
         request_key = line_data[self.line_format_alb['timestamp']].rsplit(':', 1)[0]
-        request_key += ' ' + line_data[self.line_format_alb['source_ip']].rsplit(':', 1)[0]
+        ip = line_data[self.line_format_alb['source_ip']].rsplit(':', 1)[0]
+        request_key += ' ' + ip
         return_code_index = self.line_format_alb['code']
         uri = urlparse(line_data[self.line_format_alb['uri']]).path
 
-        return  request_key, uri, return_code_index, line_data
+        return request_key, uri, return_code_index, ip, line_data
 
 
     def read_cloudfront_log_file(self, line): 
         line_data = line.split(self.line_format_cloud_front['delimiter'])
         request_key = line_data[self.line_format_cloud_front['date']]
         request_key += ' ' + line_data[self.line_format_cloud_front['time']][:-3]
-        request_key += ' ' + line_data[self.line_format_cloud_front['source_ip']]
+        ip = line_data[self.line_format_cloud_front['source_ip']]
+        request_key += ' ' + ip
         return_code_index = self.line_format_cloud_front['code']
         uri = urlparse(line_data[self.line_format_cloud_front['uri']]).path
 
-        return  request_key, uri, return_code_index, line_data
+        return request_key, uri, return_code_index, ip, line_data
 
 
     def update_threshold_counter(self, request_key, uri, return_code_index, line_data, counter): 
@@ -118,11 +121,12 @@ class LambdaLogParser(object):
             'general': {},
             'uriList': {}
         }
+        bad_bot_ips = []
 
         with gzip.open(local_file_path, 'r') as content:
             for line in content:
                 try:  
-                    oreq = self.read_contents(line, log_type, outstanding_requesters, counter)
+                    oreq = self.read_contents(line, log_type, outstanding_requesters, counter, bad_bot_ips)
                     if oreq: 
                         return oreq
 
@@ -133,39 +137,69 @@ class LambdaLogParser(object):
                     if error_count == 5:  #Allow 5 errors before stopping the function execution
                         raise
         remove(local_file_path)
-        return counter, outstanding_requesters
+        return counter, outstanding_requesters, bad_bot_ips
 
 
-    def read_contents(self, line, log_type, outstanding_requesters, counter):
+    def read_contents(self, line, log_type, outstanding_requesters, counter, bad_bot_ips):
         request_key = ""
         uri = ""
+        ip = ""
         return_code_index = None
 
         if log_type == 'waf':
-            request_key, uri, line_data = self.read_waf_log_file(line)
+            request_key, uri, ip, line_data = self.read_waf_log_file(line)
         elif log_type == 'alb':
             line = line.decode('utf8')
             if line.startswith('#'):
                 return
-            request_key, uri, return_code_index, line_data = \
+            request_key, uri, return_code_index, ip, line_data = \
                 self.read_alb_log_file(line)
         elif log_type == 'cloudfront':
             line = line.decode('utf8')
             if line.startswith('#'):
                 return
-            request_key, uri, return_code_index, line_data = \
+            request_key, uri, return_code_index, ip, line_data = \
                 self.read_cloudfront_log_file(line)
         else:
             return outstanding_requesters
-        
-        if 'ignoredSufixes' in self.config['general'] and uri.endswith(
-                tuple(self.config['general']['ignoredSufixes'])):
-            self.log.debug(
-                "[lambda_log_parser: get_outstanding_requesters] Skipping line %s. Included in ignoredSufixes." % line)
-            return
 
-        counter = self.update_threshold_counter(request_key, uri, return_code_index, line_data, counter)
-    
+        if self.is_full_log():
+            if 'ignoredSufixes' in self.config['general'] and uri.endswith(
+                    tuple(self.config['general']['ignoredSufixes'])):
+                self.log.debug(
+                    "[lambda_log_parser: get_outstanding_requesters] Skipping line %s. Included in ignoredSufixes." % line)
+                return
+
+            counter = self.update_threshold_counter(request_key, uri, return_code_index, line_data, counter)
+
+        self.log.debug("[lambda_log_parser: bad_bot_urls_population] Start")
+        bad_bot_ips = self.bad_bot_urls_population(uri, ip, bad_bot_ips, log_type)
+        self.log.debug("[lambda_log_parser: bad_bot_urls_population] End")
+
+    @staticmethod
+    def is_full_log():
+        return os.getenv('BAD_BOT_LOG_PARSER', 'false') == 'false'
+
+    @staticmethod
+    def is_bad_bot_active(log_type):
+        return ((log_type == 'alb' or log_type == 'cloudfront') and os.getenv('BAD_BOT_LAMBDA_ACCESS_LOG_ENABLED', 'false') == 'true') \
+                or (log_type == 'waf' and os.getenv('BAD_BOT_LAMBDA_WAF_ENABLED', 'false') == 'true')
+
+    def bad_bot_urls_population(self, uri, ip, bad_bot_ips, log_type):
+        is_bad_bot_active = self.is_bad_bot_active(log_type)
+        self.log.debug("[lambda_log_parser: is_bad_bot_active] %s" % is_bad_bot_active)
+
+        new_bad_bot_ips = []
+        if is_bad_bot_active:
+            urls = os.getenv('BAD_BOT_URLS', '').split("|")
+            bad_bot_urls = [f"/{url.strip()}" for url in urls if url.strip()]
+            if uri in bad_bot_urls:
+                new_bad_bot_ips.append(ip)
+
+        self.log.debug("[lambda_log_parser: bad_bot_urls_population, new_bad_bot_ips] %s" % new_bad_bot_ips)
+        bad_bot_ips.extend(new_bad_bot_ips)
+        return bad_bot_ips
+
 
     def parse_log_file(self, bucket_name, key_name, log_type):
         self.log.debug("[lambda_log_parser: parse_log_file] Start")
@@ -173,16 +207,30 @@ class LambdaLogParser(object):
         # --------------------------------------------------------------------------------------------------------------
         self.log.info("[lambda_log_parser: parse_log_file] Download file from S3")
         # --------------------------------------------------------------------------------------------------------------
-        local_file_path = TMP_DIR + key_name.split('/')[-1]
-        self.s3_util.download_file_from_s3(bucket_name, key_name, local_file_path)
+        # Use with statement to ensure proper resource management
+        with tempfile.NamedTemporaryFile(delete=False, suffix='-' + key_name.split('/')[-1]) as temp_file:
+            local_file_path = temp_file.name
+        
+        try:
+            # Set restrictive file permissions (600 - owner read/write only)
+            os.chmod(local_file_path, 0o600)
+            
+            self.s3_util.download_file_from_s3(bucket_name, key_name, local_file_path)
 
-        # --------------------------------------------------------------------------------------------------------------
-        self.log.info("[lambda_log_parser: parse_log_file] Read file content")
-        # --------------------------------------------------------------------------------------------------------------
-        error_count = 0
-        counter, outstanding_requesters = self.read_log_file(local_file_path, log_type, error_count)
+            # --------------------------------------------------------------------------------------------------------------
+            self.log.info("[lambda_log_parser: parse_log_file] Read file content")
+            # --------------------------------------------------------------------------------------------------------------
+            error_count = 0
+            counter, outstanding_requesters, bad_bot_ips  = self.read_log_file(local_file_path, log_type, error_count)
 
-        return counter, outstanding_requesters
+            return counter, outstanding_requesters, bad_bot_ips
+            
+        finally:
+            # Ensure cleanup even if exceptions occur
+            try:
+                os.unlink(local_file_path)
+            except OSError:
+                pass  # File may already be deleted
 
 
     def get_general_outstanding_requesters(self, counter, outstanding_requesters,
@@ -261,19 +309,35 @@ class LambdaLogParser(object):
 
 
     def get_current_blocked_ips(self, bucket_name, key_name, output_key_name):
-        local_file_path = TMP_DIR + key_name.split('/')[-1] + '_REMOTE.json'
-        self.s3_util.download_file_from_s3(bucket_name, output_key_name, local_file_path)
+        self.log.info(f"[get_current_blocked_ips] Processing source file: {key_name}")
+        self.log.info(f"[get_current_blocked_ips] Downloading current blocked IPs from: {output_key_name}")
+        
+        # Use with statement to ensure proper resource management
+        with tempfile.NamedTemporaryFile(delete=False, suffix='_REMOTE.json') as temp_file:
+            local_file_path = temp_file.name
+        
+        try:
+            # Set restrictive file permissions (600 - owner read/write only)
+            os.chmod(local_file_path, 0o600)
+            
+            self.s3_util.download_file_from_s3(bucket_name, output_key_name, local_file_path)
 
-        remote_outstanding_requesters = {
-            'general': {},
-            'uriList': {}
-        }
+            remote_outstanding_requesters = {
+                'general': {},
+                'uriList': {}
+            }
 
-        with open(local_file_path, 'r') as file_content:
-            remote_outstanding_requesters = json.loads(file_content.read())
-        remove(local_file_path)
+            with open(local_file_path, 'r') as file_content:
+                remote_outstanding_requesters = json.loads(file_content.read())
 
-        return remote_outstanding_requesters
+            return remote_outstanding_requesters
+            
+        finally:
+            # Ensure cleanup even if exceptions occur
+            try:
+                os.unlink(local_file_path)
+            except OSError:
+                pass  # File may already be deleted
 
 
     def iterate_general_list_for_existing_ip(self, k, v, outstanding_requesters, utc_now_timestamp_str):
@@ -475,18 +539,29 @@ class LambdaLogParser(object):
 
     def write_output(self, bucket_name, key_name, output_key_name, outstanding_requesters):
         self.log.debug("[lambda_log_parser: write_output] Start")
+        self.log.info(f"[write_output] Writing results for source file: {key_name}")
+        self.log.info(f"[write_output] Output destination: {output_key_name}")
 
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='_LOCAL.json') as temp_file:
+            current_data = temp_file.name
+            json.dump(outstanding_requesters, temp_file)
+        
         try:
-            current_data = TMP_DIR + key_name.split('/')[-1] + '_LOCAL.json'
-            with open(current_data, 'w') as outfile:
-                json.dump(outstanding_requesters, outfile)
+            # Set restrictive file permissions (600 - owner read/write only)
+            os.chmod(current_data, 0o600)
 
             self.s3_util.upload_file_to_s3(current_data, bucket_name, output_key_name)
-            remove(current_data)
 
         except Exception as e:
-            self.log.error("[lambda_log_parser: write_output] Error to write output file")
+            self.log.error(f"[lambda_log_parser: write_output] Error writing output file for source: {key_name}")
             self.log.error(e)
+            
+        finally:
+            # Ensure cleanup even if exceptions occur
+            try:
+                os.unlink(current_data)
+            except OSError:
+                pass  # File may already be deleted
 
         self.log.debug("[lambda_log_parser: write_output] End")
 
@@ -592,17 +667,16 @@ class LambdaLogParser(object):
             # --------------------------------------------------------------------------------------------------------------
             addresses_v4, addresses_v6 = self.build_ip_list_to_block(unified_outstanding_requesters)
 
-            # --------------------------------------------------------------------------------------------------------------
-            self.log.info("[ update_ip_set] Commit changes in WAF IP set")
-            # --------------------------------------------------------------------------------------------------------------
-            response = self.waflib.update_ip_set(self.log, self.scope, ipset_name_v4, ipset_arn_v4, addresses_v4)
-            self.log.debug("[update_ip_set] update ipsetv4 response: \n%s" % response)
+            self.log.info("[update_ip_set] Changes in WAF IP set v4")
+            self.waflib.update_ip_set(self.log, self.scope, ipset_name_v4, ipset_arn_v4, addresses_v4)
+            self.log.info("[update_ip_set]  IPSet %s with %d IP addresses v4", ipset_name_v4, len(addresses_v4))
 
             # Sleep for a few seconds to mitigate AWS WAF Update API call throttling issue
             sleep(self.delay_between_updates)
-            
-            response = self.waflib.update_ip_set(self.log, self.scope, ipset_name_v6, ipset_arn_v6, addresses_v6)
-            self.log.debug("[update_ip_set] update ipsetv6 response: \n%s" % response)
+
+            self.log.info("[update_ip_set] Changes in WAF IP set v6")
+            self.waflib.update_ip_set(self.log, self.scope, ipset_name_v6, ipset_arn_v6, addresses_v6)
+            self.log.info("[update_ip_set]  IPSet %s with %d IP addresses v6", ipset_name_v6, len(addresses_v6))
 
         except Exception as error:
             self.log.error(str(error))
@@ -619,25 +693,72 @@ class LambdaLogParser(object):
         self.log.info("[lambda_log_parser: process_log_file] Reading input data and get outstanding requesters")
         # --------------------------------------------------------------------------------------------------------------
         self.config = self.s3_util.read_json_config_file_from_s3(bucket_name, conf_filename)
-        counter, outstanding_requesters = self.parse_log_file(bucket_name, key_name, log_type)
-        outstanding_requesters = self.get_outstanding_requesters(log_type, counter, outstanding_requesters)
-        outstanding_requesters, need_update = self.merge_outstanding_requesters(
-            bucket_name, key_name, log_type, output_filename, outstanding_requesters)
+        counter, outstanding_requesters, bad_bot_ips = self.parse_log_file(bucket_name, key_name, log_type)
 
-        if need_update:
-            # ----------------------------------------------------------------------------------------------------------
-            self.log.info("[process_log_file] Update new blocked requesters list to S3")
-            # ----------------------------------------------------------------------------------------------------------
-            self.write_output(bucket_name, key_name, output_filename, outstanding_requesters)
+        is_requesters_update = False
 
-            # ----------------------------------------------------------------------------------------------------------
-            self.log.info("[process_log_file] Update WAF IP Set")
-            # ----------------------------------------------------------------------------------------------------------
-            self.update_ip_set(ip_set_type, outstanding_requesters)
+        if not self.is_empty_counter(counter):
+            outstanding_requesters = self.get_outstanding_requesters(log_type, counter, outstanding_requesters)
+            outstanding_requesters, need_update = self.merge_outstanding_requesters(
+                bucket_name, key_name, log_type, output_filename, outstanding_requesters)
 
-        else:
-            # ----------------------------------------------------------------------------------------------------------
-            self.log.info("[process_log_file] No changes identified")
-            # ----------------------------------------------------------------------------------------------------------
+            is_requesters_update = need_update
+
+            if need_update:
+                # ----------------------------------------------------------------------------------------------------------
+                self.log.info("[process_log_file] Update new blocked requesters list to S3")
+                # ----------------------------------------------------------------------------------------------------------
+                self.write_output(bucket_name, key_name, output_filename, outstanding_requesters)
+
+                # ----------------------------------------------------------------------------------------------------------
+                self.log.info("[process_log_file] Update WAF IP Set")
+                # ----------------------------------------------------------------------------------------------------------
+                self.update_ip_set(ip_set_type, outstanding_requesters)
+
+            else:
+                # ----------------------------------------------------------------------------------------------------------
+                self.log.info("[process_log_file] No changes identified")
+                # ----------------------------------------------------------------------------------------------------------
+
+        if bad_bot_ips:
+            if is_requesters_update:
+                # Sleep for a few seconds to mitigate AWS WAF Update API call throttling issue
+                sleep(self.delay_between_updates)
+            self.bad_bot_ips_to_ip_set(bad_bot_ips)
 
         self.log.debug('[process_log_file] End')
+
+    def is_empty_counter(self, counter):
+        is_empty_counter = not counter['general'] and not counter['uriList']
+        self.log.info("[process_log_file] is_counter_empty  %s " % is_empty_counter)
+        return is_empty_counter
+
+    def bad_bot_ips_to_ip_set(self, ips):
+        ipset_name_v4 = os.getenv('IP_SET_NAME_BAD_BOTV4')
+        ipset_name_v6 = os.getenv('IP_SET_NAME_BAD_BOTV6')
+        ipset_arn_v4 = os.getenv('IP_SET_ID_BAD_BOTV4')
+        ipset_arn_v6 = os.getenv('IP_SET_ID_BAD_BOTV6')
+        limit = int(os.getenv('LIMIT_IP_ADDRESS_RANGES_PER_IP_MATCH_CONDITION', 10000))
+
+        addresses_v4 = []
+        addresses_v6 = []
+
+        for k in ips:
+            ip_type = self.waflib.which_ip_version(self.log, k)
+            source_ip = self.waflib.set_ip_cidr(self.log, k)
+
+            if ip_type == "IPV4":
+                addresses_v4.append(source_ip)
+            elif ip_type == "IPV6":
+                addresses_v6.append(source_ip)
+
+        if addresses_v4:
+            self.log.info("[Bad bot update_ip_set] Changes in WAF IP set V4")
+            self.waflib.patch_ip_set(self.log, self.scope, ipset_name_v4, ipset_arn_v4, addresses_v4, limit)
+            self.log.info("[Bad bot update_ip_set]  IPSet %s with %d IP addresses v4", ipset_name_v4, len(addresses_v4))
+            sleep(self.delay_between_updates)
+
+        if addresses_v6:
+            self.log.info("[Bad bot update_ip_set] Changes in WAF IP set V6")
+            self.waflib.patch_ip_set(self.log, self.scope, ipset_name_v6, ipset_arn_v6, addresses_v6, limit)
+            self.log.info("[Bad bot update_ip_set]  IPSet %s with %d IP addresses v6", ipset_name_v6, len(addresses_v6))

@@ -1,0 +1,30 @@
+ SELECT DISTINCT bad_bot_ip
+        FROM (
+            WITH logs_with_concat_data AS (
+                SELECT
+                    requestip as bad_bot_ip,
+                    uri as bad_bot_uri,
+                    parse_datetime(
+                        concat(
+                            concat(format_datetime(date, 'yyyy-MM-dd'), '-'),
+                            time
+                        ),
+                        'yyyy-MM-dd-HH:mm:ss'
+                    ) AS datetime
+                FROM
+                    testdb.testtable
+
+		WHERE year = 2020
+		AND month = 05
+		AND day = 07
+		AND hour between 13 and 13
+        )
+        SELECT
+            bad_bot_ip
+        FROM
+            logs_with_concat_data
+        WHERE
+            datetime > TIMESTAMP '2020-05-07 13:23:00'
+            AND (bad_bot_uri LIKE '%/ProdStage%' OR bad_bot_uri LIKE '%/CFDeploymentStage%')
+        )
+        LIMIT 10000;
