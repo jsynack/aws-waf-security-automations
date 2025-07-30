@@ -175,7 +175,7 @@ class WAFLIBv2(object):
             ip_set = self.get_ip_set(log, scope, name, ip_set_arn)
             lock_token = ip_set['LockToken']
             description = ip_set['IPSet']['Description']
-            log.info("Updating IPSet with description: %s, lock token: %s", str(description), str(lock_token))
+            log.info("Updating IPSet with description: %s", str(description))
 
             response = client.update_ip_set(
                 Scope=scope,
@@ -186,26 +186,46 @@ class WAFLIBv2(object):
                 LockToken=lock_token
             )
 
-            new_ip_set = self.get_ip_set(log, scope, name, ip_set_id)
-
             log.debug("[waflib:update_ip_set] update ip set response:\n{}".format(response))
             log.info("[waflib:update_ip_set] End")
-            return new_ip_set
+
+            return response
         except Exception as e:
             log.error(e)
-            log.error("Failed to update IPSet: %s", str(ip_set_id))
+            log.error("Failed to update IPSet: %s", str(name))
             return None
             
     
     # Put Log Configuration for webacl
     @on_exception(expo, client.exceptions.WAFInternalErrorException, max_time=MAX_TIME)
-    def put_logging_configuration(self, log, web_acl_arn, delivery_stream_arn):
+    def put_logging_configuration(self, log, web_acl_arn, delivery_stream_arn, is_bad_bot_waf_logs, bad_bot_waf_logs_label):
         try:
-            response = client.put_logging_configuration(
-                LoggingConfiguration={
-                    'ResourceArn': web_acl_arn,
-                    'LogDestinationConfigs': [delivery_stream_arn]
+
+            logging_config = {
+                'ResourceArn': web_acl_arn,
+                'LogDestinationConfigs': [delivery_stream_arn]
+            }
+
+            if is_bad_bot_waf_logs:
+                logging_config['LoggingFilter'] = {
+                    'DefaultBehavior': 'DROP',
+                    'Filters': [
+                        {
+                            'Behavior': 'KEEP',
+                            'Requirement': 'MEETS_ALL',
+                            'Conditions': [
+                                {
+                                    'LabelNameCondition': {
+                                        'LabelName': bad_bot_waf_logs_label
+                                    }
+                                }
+                            ]
+                        }
+                    ]
                 }
+
+            response = client.put_logging_configuration(
+                LoggingConfiguration=logging_config
             )
             return response
         except Exception as e:
@@ -260,3 +280,57 @@ class WAFLIBv2(object):
             log.error("Failed to delete IPSet: %s", str(name))
             log.error(str(e))
             return None
+
+    @on_exception(expo, client.exceptions.WAFOptimisticLockException,
+                  max_time=MAX_TIME,
+                  jitter=full_jitter,
+                  max_tries=API_CALL_NUM_RETRIES)
+    def patch_ip_set(self, log, scope, name, ip_set_arn, addresses, ip_range_limit):
+        log.info("[waflib:patch_ip_set] Start")
+        if (ip_set_arn is None or name is None):
+            log.error("No IPSet found for: %s ", str(ip_set_arn))
+            return None
+
+        try:
+            # convert from arn to ip_set_id
+            ip_set_id = self.arn_to_id(ip_set_arn)
+
+            # retrieve the ipset to get a locktoken
+            ip_set = self.get_ip_set(log, scope, name, ip_set_arn)
+            lock_token = ip_set['LockToken']
+            description = ip_set['IPSet']['Description']
+            current_list = ip_set["IPSet"]["Addresses"]
+
+            new_list = self.merge_and_truncate_addresses(log, addresses, current_list, ip_range_limit)
+
+            log.info("Patch IPSet with description: %s", str(description))
+
+            response = client.update_ip_set(
+                Scope=scope,
+                Name=name,
+                Description=description,
+                Id=ip_set_id,
+                Addresses=new_list,
+                LockToken=lock_token
+            )
+
+            log.debug("[waflib:patch_ip_set] patch ip set response:\n{}".format(response))
+            log.info("[waflib:patch_ip_set] patch End")
+
+            return response
+        except Exception as e:
+            log.error(e)
+            log.error("Failed to patch IPSet: %s", str(name))
+            return None
+
+    def merge_and_truncate_addresses(self, log, addresses, current_list, ip_range_limit):
+
+        new_list = self.ips_ordered_merge(addresses, current_list)
+        if len(new_list) > ip_range_limit:
+            log.info("[truncate_list] Start to truncate list to respect WAF ip range limit")
+            new_list = new_list[:ip_range_limit]
+        return new_list
+
+    def ips_ordered_merge(self, addresses, remaining_ips):
+        seen = set()
+        return [ip for ip in [*addresses, *remaining_ips] if not (ip in seen or seen.add(ip))]

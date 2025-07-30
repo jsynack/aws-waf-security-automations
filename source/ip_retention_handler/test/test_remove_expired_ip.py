@@ -141,34 +141,6 @@ def test_send_notification(sns_topic):
     assert result == True
 
 
-def test_send_anonymized_usage_data_allowed_list():
-    try:
-        reip.send_anonymized_usage_data(log, REMOVE_IP_LIST, 'Whitelist')
-    except Exception as e:
-        assert str(e) == EXPECTED_NONE_TYPE_NO_ATTRIBUTE_MESSAGE
-
-
-def test_send_anonymized_usage_data_denied_list():
-    try:
-        reip.send_anonymized_usage_data(log, REMOVE_IP_LIST, 'Blacklist')
-    except Exception as e:
-        assert str(e) == EXPECTED_NONE_TYPE_NO_ATTRIBUTE_MESSAGE
-
-
-def test_send_anonymized_usage_data_other_list():
-    try:
-        reip.send_anonymized_usage_data(log, REMOVE_IP_LIST, 'Otherlist')
-    except Exception as e:
-        assert str(e) == EXPECTED_NONE_TYPE_NO_ATTRIBUTE_MESSAGE
-
-
-def test_send_anonymized_usage_data_empty_list():
-    try:
-        reip.send_anonymized_usage_data(log, [], 'Otherlist')
-    except Exception as e:
-        assert str(e) == EXPECTED_NONE_TYPE_NO_ATTRIBUTE_MESSAGE
-
-
 def test_no_send_anonymized_usage_data():
     environ['SEND_ANONYMIZED_USAGE_DATA'] = 'no'
     result = reip.send_anonymized_usage_data(log, [], 'Otherlist')

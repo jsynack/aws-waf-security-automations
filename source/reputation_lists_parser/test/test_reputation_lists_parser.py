@@ -2,6 +2,8 @@
 #  SPDX-License-Identifier: Apache-2.0
 
 from types import SimpleNamespace
+from unittest.mock import Mock
+from urllib.parse import urlparse
 
 from reputation_lists_parser import reputation_lists
 from lib.cw_metrics_util import WAFCloudWatchMetrics
@@ -72,3 +74,54 @@ def test_lambda_handler_returns_success(mocker):
         reputation_lists.waflib.get_ip_set.return_value = ip_set
         response = reputation_lists.lambda_handler(event, context)
         assert response == '{"StatusCode": "200", "Body": {"message": "success"}}'
+
+
+def test_is_scheme_valid():
+    https_url = urlparse("https://api.spamhaus.org")
+    http_url = urlparse("http://api.spamhaus.org")
+    
+    assert reputation_lists.is_scheme_valid(https_url) == True
+    assert reputation_lists.is_scheme_valid(http_url) == False
+
+
+def test_is_domain_trusted():
+    assert reputation_lists.is_domain_trusted("api.spamhaus.org") == True
+    assert reputation_lists.is_domain_trusted("check.torproject.org") == True
+    assert reputation_lists.is_domain_trusted("rules.emergingthreats.net") == True
+    assert reputation_lists.is_domain_trusted("malicious.com") == False
+
+
+def test_is_url_valid():
+    assert reputation_lists.is_url_valid("https://api.spamhaus.org/path") == True
+    assert reputation_lists.is_url_valid("http://api.spamhaus.org/path") == False
+    assert reputation_lists.is_url_valid("https://malicious.com/path") == False
+
+
+def test_validate_content_type():
+    response = Mock()
+    response.headers = {'Content-Type': 'text/plain; charset=utf-8'}
+    assert reputation_lists.validate_content_type(response) == True
+    
+    response.headers = {'Content-Type': 'text/html'}
+    assert reputation_lists.validate_content_type(response) == False
+
+
+def test_has_nosniff_header():
+    response = Mock()
+    response.headers = {'X-Content-Type-Options': 'nosniff'}
+    assert reputation_lists.has_nosniff_header(response) == True
+    
+    response.headers = {'X-Content-Type-Options': 'other'}
+    assert reputation_lists.has_nosniff_header(response) == False
+
+
+def test_is_response_valid():
+    response = Mock()
+    response.headers = {'Content-Type': 'text/plain'}
+    assert reputation_lists.is_response_valid(response) == True
+    
+    response.headers = {'X-Content-Type-Options': 'nosniff'}
+    assert reputation_lists.is_response_valid(response) == True
+    
+    response.headers = {}
+    assert reputation_lists.is_response_valid(response) == False

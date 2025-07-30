@@ -29,8 +29,8 @@ class WAFCloudWatchMetrics(object):
     def get_cw_metric_statistics(self, metric_name, period_seconds, waf_rule,
                                 namespace='AWS/WAFV2',
                                 statistics=['Sum'], 
-                                start_time=datetime.datetime.utcnow(),
-                                end_time=datetime.datetime.utcnow(),
+                                start_time=datetime.datetime.now(datetime.UTC),
+                                end_time=datetime.datetime.now(datetime.UTC),
                                 web_acl='STACK_NAME'):
         """
         Get a WAF CloudWatch metric given a WAF rule and metric name.

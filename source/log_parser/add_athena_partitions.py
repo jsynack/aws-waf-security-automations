@@ -67,7 +67,7 @@ def build_athena_query(database_name, table_name):
         string. Athena query string
     """
 
-    current_timestamp = datetime.datetime.utcnow()
+    current_timestamp = datetime.datetime.now(datetime.UTC)
     year = current_timestamp.year
     month = current_timestamp.month
     day = current_timestamp.day

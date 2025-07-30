@@ -3,7 +3,7 @@
 
 from time import sleep
 from os import environ, getenv
-from datetime import datetime
+from datetime import datetime, UTC
 from boto3.dynamodb.types import TypeDeserializer
 from lib.waflibv2 import WAFLIBv2
 from lib.sns_util import SNS
@@ -142,7 +142,7 @@ class RemoveExpiredIP(object):
                   "timestamp below. \n\n" \
                   "IP set name: {}\n IP set id: {}\n IP retention period (minute): {}\n Region: {}\n UTC Time: {}" \
                   .format(lambda_function_name, ip_set_name, ip_set_id, ip_retention_period, environ.get('AWS_REGION'), \
-                   datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'))
+                   datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%SZ'))
         
         log.info("Message: {}".format(message))
         

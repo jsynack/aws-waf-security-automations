@@ -22,7 +22,7 @@ WAF_FOR_CLOUDFRONT_EXCEPTION_MESSAGE = '''
     If you are capturing AWS WAF logs for a Amazon CloudFront 
     distribution, create the stack in US East (N. Virginia).'''
 INVALID_FLOOD_THRESHOLD_MESSAGE = '''
-    The minimum rate-based rule rate limit per 5 minute period is 100. 
+    The minimum rate-based rule rate limit per 1 minute period is 10. 
     If need to use values below that, 
     please select AWS Lambda or Amazon Athena log parser.'''
 EMPTY_S3_BUCKET_NAME_EXCEPTION_MESSAGE = '''
@@ -192,7 +192,7 @@ class StackRequirements:
 
     def is_invalid_flood_threshold(self, resource_properties: dict) -> bool:
         return resource_properties['HttpFloodProtectionRateBasedRuleActivated'] == "yes" and \
-            int(resource_properties['RequestThreshold']) < 100
+            int(resource_properties['RequestThreshold']) < 10
     
 
     def generate_suffix(self) -> str:

@@ -23,7 +23,6 @@ from moto import (
     mock_s3
 )
 from uuid import UUID
-from lib.boto3_util import create_client
 import logging
 import boto3
 
@@ -123,7 +122,7 @@ def test_check_requirements_invalid_flood_threshold():
         'HttpFloodProtectionRateBasedRuleActivated': "yes",
         'EndpointType': 'cloudfront',
         'Region': 'us-east-1',
-        'RequestThreshold': '10'
+        'RequestThreshold': '9'
     }
     expected = INVALID_FLOOD_THRESHOLD_MESSAGE
 
@@ -148,7 +147,7 @@ def test_is_waf_for_cloudfront():
 def test_is_invalid_flood_threshold():
     resource_properties = {
         'HttpFloodProtectionRateBasedRuleActivated': "yes",
-        'RequestThreshold': '10'
+        'RequestThreshold': '9'
     }
     expected = True
     res = stack_requirements.is_invalid_flood_threshold(resource_properties)

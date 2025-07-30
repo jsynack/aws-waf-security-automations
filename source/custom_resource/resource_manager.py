@@ -14,6 +14,7 @@ import html
 import json
 import botocore
 import os
+import tempfile
 from logging import Logger
 from lib.waflibv2 import WAFLIBv2
 from lib.boto3_util import create_client
@@ -52,7 +53,7 @@ class ResourceManager:
         params['bucket_name'] = resource_props['WafLogBucket']
         params['lambda_function_arn'] = resource_props.get('LogParser', None)
         params['lambda_log_partition_function_arn'] = None
-        params['lambda_parser'] = resource_props['HttpFloodLambdaLogParser'] == 'yes'
+        params['lambda_parser'] = resource_props['HttpFloodLambdaLogParser'] == 'yes' or resource_props['BadBotLambdaLogParser'] == 'yes'
         params['athena_parser'] = resource_props['HttpFloodAthenaLogParser'] == 'yes'
         params['bucket_prefix'] = AWS_LOGS_PATH_PREFIX
         return params
@@ -173,10 +174,10 @@ class ResourceManager:
         resource_props = event.get('ResourceProperties', {})
         old_resource_props = event.get('OldResourceProperties', {})
         lambda_log_parser_function = resource_props.get('LogParser', None)
-        lambda_parser = resource_props['HttpFloodLambdaLogParser'] == 'yes'
+        lambda_parser = resource_props['HttpFloodLambdaLogParser'] == 'yes' or resource_props['BadBotLambdaLogParser'] == 'yes'
         athena_parser = resource_props['HttpFloodAthenaLogParser'] == 'yes'
         old_lambda_app_log_parser_function = old_resource_props.get('LogParser', None)
-        old_lambda_parser = old_resource_props['HttpFloodLambdaLogParser'] == 'yes'
+        old_lambda_parser = old_resource_props['HttpFloodLambdaLogParser'] == 'yes' or old_resource_props['BadBotLambdaLogParser'] == 'yes'
         old_athena_parser = old_resource_props['HttpFloodAthenaLogParser'] == 'yes'
         old_waf_bucket = old_resource_props['WafLogBucket']
         new_waf_bucket = resource_props['WafLogBucket']
@@ -400,7 +401,10 @@ class ResourceManager:
         self.waflib.put_logging_configuration(
             log=self.log,
             web_acl_arn=event['ResourceProperties']['WAFWebACLArn'], 
-            delivery_stream_arn=event['ResourceProperties']['DeliveryStreamArn'])
+            delivery_stream_arn=event['ResourceProperties']['DeliveryStreamArn'],
+            is_bad_bot_waf_logs=event['ResourceProperties']['IsBadBotOnlyWAFLogs'] == 'true',
+            bad_bot_waf_logs_label=event['ResourceProperties']['BadBotWafLogLabel']
+        )
 
         self.log.debug("[waflib:put_logging_configuration] End")
 
@@ -441,25 +445,37 @@ class ResourceManager:
 
         self.log.debug("[generate_app_log_parser_conf_file] Start")
 
-        local_file = '/tmp/' + stack_name + '-app_log_conf_LOCAL.json' #NOSONAR tmp use for an insensitive workspace
-        remote_file = stack_name + '-app_log_conf.json'
-        default_conf = {
-            'general': {
-                'errorThreshold': error_threshold,
-                'blockPeriod': block_period,
-                'errorCodes': ['400', '401', '403', '404', '405']
-            },
-            'uriList': {
+        with tempfile.NamedTemporaryFile(mode='w', suffix='-app_log_conf.json', delete=False) as temp_file:
+            local_file = temp_file.name
+            remote_file = stack_name + '-app_log_conf.json'
+            
+            default_conf = {
+                'general': {
+                    'errorThreshold': error_threshold,
+                    'blockPeriod': block_period,
+                    'errorCodes': ['400', '401', '403', '404', '405']
+                },
+                'uriList': {
+                }
             }
-        }
 
-        if not overwrite:
-            self.update_app_log_parser_conf(default_conf, app_access_log_bucket, remote_file)
+            if not overwrite:
+                self.update_app_log_parser_conf(default_conf, app_access_log_bucket, remote_file)
 
-        with open(local_file, 'w') as outfile:
-            json.dump(default_conf, outfile)
+            json.dump(default_conf, temp_file)
+        
+        try:
+            # Set restrictive file permissions (600 - owner read/write only)
+            os.chmod(local_file, 0o600)
 
-        self.s3.upload_file_to_s3(local_file, app_access_log_bucket, remote_file, extra_args={'ContentType': "application/json"})
+            self.s3.upload_file_to_s3(local_file, app_access_log_bucket, remote_file, extra_args={'ContentType': "application/json"})
+
+        finally:
+            # Ensure cleanup even if exceptions occur
+            try:
+                os.unlink(local_file)
+            except OSError:
+                pass  # File may already be deleted
 
         self.log.debug("[generate_app_log_parser_conf_file] End")
 
@@ -565,25 +581,37 @@ class ResourceManager:
         block_period = int(resource_props['WAFBlockPeriod'])
         waf_access_log_bucket = resource_props['WafAccessLogBucket']
 
-        local_file = '/tmp/' + stack_name + '-waf_log_conf_LOCAL.json' #NOSONAR tmp use for an insensitive workspace
-        remote_file = stack_name + '-waf_log_conf.json'
-        default_conf = {
-            'general': {
-                'requestThreshold': request_threshold,
-                'blockPeriod': block_period,
-                'ignoredSufixes': []
-            },
-            'uriList': {
+        with tempfile.NamedTemporaryFile(mode='w', suffix='-waf_log_conf.json', delete=False) as temp_file:
+            local_file = temp_file.name
+            remote_file = stack_name + '-waf_log_conf.json'
+            
+            default_conf = {
+                'general': {
+                    'requestThreshold': request_threshold,
+                    'blockPeriod': block_period,
+                    'ignoredSufixes': []
+                },
+                'uriList': {
+                }
             }
-        }
 
-        if not overwrite:
-            self.update_waf_log_parser_conf(default_conf, waf_access_log_bucket)
+            if not overwrite:
+                self.update_waf_log_parser_conf(default_conf, waf_access_log_bucket)
 
-        with open(local_file, 'w') as outfile:
-            json.dump(default_conf, outfile)
+            json.dump(default_conf, temp_file)
+        
+        try:
+            # Set restrictive file permissions (600 - owner read/write only)
+            os.chmod(local_file, 0o600)
 
-        self.s3.upload_file_to_s3(local_file, waf_access_log_bucket, remote_file, extra_args={'ContentType': "application/json"})
+            self.s3.upload_file_to_s3(local_file, waf_access_log_bucket, remote_file, extra_args={'ContentType': "application/json"})
+
+        finally:
+            # Ensure cleanup even if exceptions occur
+            try:
+                os.unlink(local_file)
+            except OSError:
+                pass  # File may already be deleted
 
         self.log.debug("[generate_waf_log_parser_conf_file] End")
     
@@ -655,7 +683,6 @@ class ResourceManager:
                         "scanners_probes_protection": resource_properties['ActivateScannersProbesProtectionParam'],
                         "reputation_lists_protection": resource_properties['ActivateReputationListsProtectionParam'],
                         "bad_bot_protection": resource_properties['ActivateBadBotProtectionParam'],
-                        "existing_api_gateway_badbot_cw_role": resource_properties['ApiGatewayBadBotCWRoleParam'],
                         "request_threshold": resource_properties['RequestThreshold'],
                         "error_threshold": resource_properties['ErrorThreshold'],
                         "waf_block_period": resource_properties['WAFBlockPeriod'],

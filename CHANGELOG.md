@@ -4,6 +4,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.0] - 2025-07-30
+
+### Added
+
+- Added CDK support
+- Added WAF rate based rule parameters in HTTP Flood Custom Rule
+- Added lambda power tools for tracing and logging
+
+### Changed
+
+- Updated the poetry version
+- Updated dependencies to address jinja2 [CVE-2024-56201](https://nvd.nist.gov/vuln/detail/CVE-2024-56201)
+- Updated dependencies: botocore, boto3, responses, coverage, certifi, charset-normalizer, pluggy, s3transfer, typing-extensions, pytest-mock, freezegun, urllib3
+- Updated dependencies to address cryptography [CVE-2024-12797](https://nvd.nist.gov/vuln/detail/CVE-2024-12797)
+- Updated dependency version of requests [CVE-2024-47081](https://nvd.nist.gov/vuln/detail/CVE-2024-47081)
+- Updated deployment scripts based on CDK changes
+- Updated datetime deprecated method for utcnow() to now(datetime.UTC)
+- Updated bad bot component behavior with improved log parsing support and detection logic
+- Updated waflib api, remove redundant calls
+- Removed http request based approach for IP detection and added WAF log based analysis to find ip for bad bot
+- Updated temporary folders restrictions
+
+### Fixed
+
+- Fixed invalid CRON expression [Github issue 261](https://github.com/aws-solutions/aws-waf-security-automations/issues/261)
+- Fixed Honeypot detecting IP address with CloudFront [Github issue 250](https://github.com/aws-solutions/aws-waf-security-automations/issues/250)
+- Fixed CloudFormation Drift for WebACL nested stack  [Github issue 257](https://github.com/aws-solutions/aws-waf-security-automations/issues/257)
+
+### Removed
+
+- Removed old stack templates
+- Access handler and Amazon API Gateway resources
+
 ## [4.0.6] - 2024-12-17
 
 ### Changed
@@ -69,7 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.2.5] - 2023-04-18
 
-### Patched
+### Fixed
 
 - Patch s3 logging bucket settings
 - Updated the timeout for requests

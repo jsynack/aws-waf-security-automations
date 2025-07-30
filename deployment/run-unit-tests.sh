@@ -73,14 +73,35 @@ run_python_lambda_test() {
 }
 
 # Run Python unit tests
-run_python_lambda_test access_handler "BadBot Access Handler Lambda"
 run_python_lambda_test custom_resource "Custom Resource Lambda"
 run_python_lambda_test helper "Helper Lambda"
 run_python_lambda_test ip_retention_handler "Set IP Retention Lambda"
 run_python_lambda_test log_parser "Log Parser Lambda"
 run_python_lambda_test reputation_lists_parser "Reputation List Parser Lambda"
 run_python_lambda_test timer "Timer Lambda"
+run_python_lambda_test metrics "Metrics Lambda"
 
 
 # Return to the directory where we started
 cd $template_dir
+
+echo "------------------------------------------------------------------------------"
+echo "[Lint] Code Style and Lint"
+echo "------------------------------------------------------------------------------"
+cd $source_dir/infrastructure
+npm run pretest
+npm run prettier
+npm run lint
+
+echo "------------------------------------------------------------------------------"
+echo "[Test] CDK Unit Tests"
+echo "------------------------------------------------------------------------------"
+cd $source_dir/infrastructure
+npm run test
+exit_status=$?
+if [ $exit_status -ne "0" ]; then
+    echo "CDK tests failed. Exiting with status code 1."
+    exit 1
+  else
+     echo "Unit Tests Successful"
+fi

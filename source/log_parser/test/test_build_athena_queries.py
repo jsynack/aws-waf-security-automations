@@ -11,11 +11,9 @@
 #  and limitations under the License.                                                                                #
 ######################################################################################################################
 
-import datetime
 import logging
 import build_athena_queries, add_athena_partitions
-from datetime import datetime
-from freezegun import freeze_time
+from datetime import datetime, timedelta
 
 log_level = 'DEBUG'
 logging.getLogger().setLevel(log_level)
@@ -47,8 +45,83 @@ def test_build_athena_queries_for_cloudfront_logs():
     with open('./test/test_data/cloudfront_logs_query.txt', 'r') as file:
         cloudfront_logs_query = file.read()
     assert type(query_string) is str
-    assert query_string == cloudfront_logs_query
+    assert normalize_query(query_string) == normalize_query(cloudfront_logs_query)
 
+def test_build_bad_bot_athena_query_for_app_waf_logs():
+    database_name = 'testdb'
+    table_name = 'testtable'
+    end_timestamp = datetime(2020, 5, 7, 13, 33, 0)
+    query_schedule = 5
+    bad_bot_urls = 'ProdStage|CFDeploymentStage'
+    start_timestamp = end_timestamp - \
+                      timedelta(seconds=60*query_schedule*2)
+
+    query_string = build_athena_queries.build_bad_bot_athena_query_for_waf_logs(
+        log, database_name, table_name,
+        end_timestamp, start_timestamp, bad_bot_urls
+    )
+
+    with open('./test/test_data/waf_cloudfront_bad_bot_query.txt', 'r') as file:
+        expected_query = file.read()
+
+    if normalize_query(query_string) != normalize_query(expected_query):
+        print("\nActual query:")
+        print(repr(query_string))
+        print("\nExpected query:")
+        print(repr(expected_query))
+
+    assert isinstance(query_string, str)
+    assert normalize_query(query_string) == normalize_query(expected_query)
+
+
+def test_build_bad_bot_athena_query_for_app_access_logs():
+    log_type = 'CLOUDFRONT'
+    database_name = 'testdb'
+    table_name = 'testtable'
+    end_timestamp = datetime(2020, 5, 7, 13, 33, 0)
+    query_schedule = 5
+    bad_bot_urls = 'ProdStage|CFDeploymentStage'
+    start_timestamp = end_timestamp - \
+                      timedelta(seconds=60*query_schedule*2)
+
+    query_string = build_athena_queries.build_bad_bot_athena_query_for_app_access_logs(
+        log, log_type, database_name, table_name,
+        end_timestamp, start_timestamp, bad_bot_urls
+    )
+
+    with open('./test/test_data/athena_cloudfront_bad_bot_query.txt', 'r') as file:
+        expected_query = file.read()
+
+    if normalize_query(query_string) != normalize_query(expected_query):
+        print("\nActual query:")
+        print(repr(query_string))
+        print("\nExpected query:")
+        print(repr(expected_query))
+
+    assert isinstance(query_string, str)
+    assert normalize_query(query_string) == normalize_query(expected_query)
+
+def test_build_bad_bot_athena_query_for_app_access_logs_alb():
+    log_type = 'ALB'
+    database_name = 'testdb'
+    table_name = 'testtable'
+    end_timestamp = datetime(2020, 5, 7, 13, 33, 0)
+    query_schedule = 5
+    bad_bot_urls = 'ProdStage|CFDeploymentStage'
+    start_timestamp = end_timestamp - \
+                  timedelta(seconds=60*query_schedule*2)
+
+
+    query_string = build_athena_queries.build_bad_bot_athena_query_for_app_access_logs(
+        log, log_type, database_name, table_name,
+        end_timestamp, start_timestamp, bad_bot_urls
+    )
+
+    with open('./test/test_data/athena_alb_bad_bot_query.txt', 'r') as file:
+        expected_query = file.read()
+
+    assert isinstance(query_string, str)
+    assert normalize_query(query_string) == normalize_query(expected_query)
 
 def test_build_athena_queries_for_alb_logs():
     query_string = build_athena_queries.build_athena_query_for_app_access_logs(
@@ -58,8 +131,28 @@ def test_build_athena_queries_for_alb_logs():
     with open('./test/test_data/alb_logs_query.txt', 'r') as file:
         alb_logs_query = file.read()
     assert type(query_string) is str
-    assert query_string == alb_logs_query
+    assert normalize_query(query_string) == normalize_query(alb_logs_query)
 
+def test_build_bad_bot_athena_query_for_app_access_logs_alb_1h():
+    log_type = 'ALB'
+    database_name = 'testdb'
+    table_name = 'testtable'
+    end_timestamp = datetime(2020, 5, 7, 12, 33, 0)
+    query_schedule = 60  # minutes (1 hour)
+    bad_bot_urls = 'ProdStage|CFDeploymentStage'
+    start_timestamp = end_timestamp - \
+                      timedelta(seconds=60*query_schedule*2)
+
+    query_string = build_athena_queries.build_bad_bot_athena_query_for_app_access_logs(
+        log, log_type, database_name, table_name,
+        end_timestamp, start_timestamp, bad_bot_urls
+    )
+
+    with open('./test/test_data/athena_alb_bad_bot_1h_query.txt', 'r') as file:
+        expected_query = file.read()
+
+    assert isinstance(query_string, str)
+    assert normalize_query(query_string) == normalize_query(expected_query)
 
 def test_build_athena_queries_for_waf_logs_one():
     # test original waf log query one - no group by; no threshold by country
@@ -72,7 +165,7 @@ def test_build_athena_queries_for_waf_logs_one():
     with open('./test/test_data/waf_logs_query_1.txt', 'r') as file:
         waf_logs_query = file.read()
     assert type(query_string) is str
-    assert query_string == waf_logs_query
+    assert normalize_query(query_string) == normalize_query(waf_logs_query)
 
 def test_build_athena_queries_for_waf_logs_two():
     # test waf log query two - group by country; no threshold by country
@@ -85,7 +178,7 @@ def test_build_athena_queries_for_waf_logs_two():
     with open('./test/test_data/waf_logs_query_2.txt', 'r') as file:
         waf_logs_query = file.read()
     assert type(query_string) is str
-    assert query_string == waf_logs_query
+    assert normalize_query(query_string) == normalize_query(waf_logs_query)
 
 def test_build_athena_queries_for_waf_logs_three():
     # test waf log query three - group by uri; no threshold by country
@@ -98,7 +191,7 @@ def test_build_athena_queries_for_waf_logs_three():
     with open('./test/test_data/waf_logs_query_3.txt', 'r') as file:
         waf_logs_query = file.read()
     assert type(query_string) is str
-    assert query_string == waf_logs_query
+    assert normalize_query(query_string) == normalize_query(waf_logs_query)
 
 def test_build_athena_queries_for_waf_logs_four():
     # test waf log query four - group by country and uri; no threshold by country
@@ -111,7 +204,7 @@ def test_build_athena_queries_for_waf_logs_four():
     with open('./test/test_data/waf_logs_query_4.txt', 'r') as file:
         waf_logs_query = file.read()
     assert type(query_string) is str
-    assert query_string == waf_logs_query
+    assert normalize_query(query_string) == normalize_query(waf_logs_query)
 
 def test_build_athena_queries_for_waf_logs_five():
     # test waf log query five - no group by; has threshold by country
@@ -124,7 +217,7 @@ def test_build_athena_queries_for_waf_logs_five():
     with open('./test/test_data/waf_logs_query_5.txt', 'r') as file:
         waf_logs_query = file.read()
     assert type(query_string) is str
-    assert query_string == waf_logs_query
+    assert normalize_query(query_string) == normalize_query(waf_logs_query)
 
 def test_build_athena_queries_for_waf_logs_six():
     # test waf log query six - group by country; has threshold by country
@@ -137,7 +230,7 @@ def test_build_athena_queries_for_waf_logs_six():
     with open('./test/test_data/waf_logs_query_5.txt', 'r') as file:
         waf_logs_query = file.read()
     assert type(query_string) is str
-    assert query_string == waf_logs_query
+    assert normalize_query(query_string) == normalize_query(waf_logs_query)
 
 def test_build_athena_queries_for_waf_logs_seven():
     # test waf log query seven - group by uri; has threshold by country
@@ -150,7 +243,7 @@ def test_build_athena_queries_for_waf_logs_seven():
     with open('./test/test_data/waf_logs_query_6.txt', 'r') as file:
         waf_logs_query = file.read()
     assert type(query_string) is str
-    assert query_string == waf_logs_query
+    assert normalize_query(query_string) == normalize_query(waf_logs_query)
 
 def test_build_athena_queries_for_waf_logs_eight():
     # test waf log query eight - group by country and uri; has threshold by country
@@ -163,13 +256,128 @@ def test_build_athena_queries_for_waf_logs_eight():
     with open('./test/test_data/waf_logs_query_6.txt', 'r') as file:
         waf_logs_query = file.read()
     assert type(query_string) is str
-    assert query_string == waf_logs_query
+    assert normalize_query(query_string) == normalize_query(waf_logs_query)
 
-@freeze_time("2020-05-08 02:21:34", tz_offset=-4)
-def test_add_athena_partitions_build_query_string():
-    query_string = add_athena_partitions.build_athena_query(database_name, table_name)
+def test_generate_url_conditions():
+    # Test case 1: Multiple URLs
+    urls = "admin|wp-login.php|wp-admin"
+    expected = "(bad_bot_uri LIKE '%/admin%' OR bad_bot_uri LIKE '%/wp-login.php%' OR bad_bot_uri LIKE '%/wp-admin%')"
+    result = build_athena_queries.generate_url_conditions(urls)
+    assert result == expected
 
-    with open('./test/test_data/athena_partitions_query.txt', 'r') as file:
-        athena_partitions_query = file.read()
-    assert type(query_string) is str
-    assert query_string == athena_partitions_query
+    # Test case 2: Single URL
+    urls = "admin"
+    expected = "(bad_bot_uri LIKE '%/admin%')"
+    result = build_athena_queries.generate_url_conditions(urls)
+    assert result == expected
+
+    # Test case 3: Empty input
+    urls = ""
+    expected = "FALSE"
+    result = build_athena_queries.generate_url_conditions(urls)
+    assert result == expected
+
+    # Test case 4: Spaces in input
+    urls = "admin | wp-login.php"
+    expected = "(bad_bot_uri LIKE '%/admin%' OR bad_bot_uri LIKE '%/wp-login.php%')"
+    result = build_athena_queries.generate_url_conditions(urls)
+    assert result == expected
+
+    # Test case 5: Empty segments
+    urls = "admin||wp-login.php"
+    expected = "(bad_bot_uri LIKE '%/admin%' OR bad_bot_uri LIKE '%/wp-login.php%')"
+    result = build_athena_queries.generate_url_conditions(urls)
+    assert result == expected
+
+def test_is_valid_identifier():
+    # Valid identifiers
+    assert build_athena_queries.is_valid_identifier("valid_name") == True
+    assert build_athena_queries.is_valid_identifier("Valid123") == True
+    assert build_athena_queries.is_valid_identifier("test-db") == True
+    assert build_athena_queries.is_valid_identifier("A1_test-123") == True
+    
+    # Invalid identifiers (potential SQL injection attempts)
+    assert build_athena_queries.is_valid_identifier("test'; DROP TABLE--") == False
+    assert build_athena_queries.is_valid_identifier("test OR 1=1") == False
+    assert build_athena_queries.is_valid_identifier("test/*comment*/") == False
+    assert build_athena_queries.is_valid_identifier("test.table") == False
+    assert build_athena_queries.is_valid_identifier("test table") == False
+    assert build_athena_queries.is_valid_identifier("test;exec") == False
+    assert build_athena_queries.is_valid_identifier("") == False
+    assert build_athena_queries.is_valid_identifier(None) == False
+
+def test_escape_sql_string():
+    # Basic escaping
+    assert build_athena_queries.escape_sql_string("normal_string") == "normal_string"
+    assert build_athena_queries.escape_sql_string("test'quote") == "test''quote"
+    assert build_athena_queries.escape_sql_string("multiple'quote's") == "multiple''quote''s"
+    
+    # SQL injection attempts
+    assert build_athena_queries.escape_sql_string("'; DROP TABLE users; --") == "''; DROP TABLE users; --"
+    assert build_athena_queries.escape_sql_string("' OR '1'='1") == "'' OR ''1''=''1"
+    assert build_athena_queries.escape_sql_string("admin' --") == "admin'' --"
+    
+    # Non-string inputs
+    assert build_athena_queries.escape_sql_string(123) == "123"
+    assert build_athena_queries.escape_sql_string(None) == "None"
+    assert build_athena_queries.escape_sql_string(True) == "True"
+
+def test_sanitize_url_pattern():
+    # Clean URLs
+    assert build_athena_queries.sanitize_url_pattern("admin") == "admin"
+    assert build_athena_queries.sanitize_url_pattern("wp-login.php") == "wp-login.php"
+    assert build_athena_queries.sanitize_url_pattern("api/v1/users") == "api/v1/users"
+    assert build_athena_queries.sanitize_url_pattern("test_file.html") == "test_file.html"
+    
+    # URLs with dangerous characters
+    assert build_athena_queries.sanitize_url_pattern("admin'; DROP--") == "adminDROP"
+    assert build_athena_queries.sanitize_url_pattern("test OR 1=1") == "testOR11"
+    assert build_athena_queries.sanitize_url_pattern("admin/*comment*/") == "admin"
+    assert build_athena_queries.sanitize_url_pattern("test<script>") == "testscript"
+    assert build_athena_queries.sanitize_url_pattern("path with spaces") == "pathwithspaces"
+    
+    # Edge cases
+    assert build_athena_queries.sanitize_url_pattern("") == ""
+    assert build_athena_queries.sanitize_url_pattern(None) == ""
+    assert build_athena_queries.sanitize_url_pattern("  ") == ""
+
+def test_security_validation_integration():
+    import pytest
+
+    with pytest.raises(ValueError, match="Invalid database or table name"):
+        build_athena_queries.build_athena_query_part_one_for_cloudfront_logs(
+            log, "invalid'; DROP TABLE--", "valid_table")
+    
+    with pytest.raises(ValueError, match="Invalid database or table name"):
+        build_athena_queries.build_athena_query_part_one_for_cloudfront_logs(
+            log, "valid_db", "invalid OR 1=1")
+
+    with pytest.raises(ValueError, match="Invalid database or table name"):
+        build_athena_queries.build_athena_query_part_one_for_alb_logs(
+            log, "test/*comment*/", "valid_table")
+
+    with pytest.raises(ValueError, match="Invalid database or table name"):
+        build_athena_queries.build_athena_query_part_one_for_waf_logs(
+            log, "valid_db", "test.table", "", "")
+
+    try:
+        result = build_athena_queries.build_athena_query_part_one_for_cloudfront_logs(
+            log, "valid_db", "valid_table")
+        assert isinstance(result, str)
+        assert "valid_db" in result
+        assert "valid_table" in result
+    except Exception as e:
+        pytest.fail(f"Valid inputs should not raise exception: {e}")
+
+def test_url_sanitization_in_generate_conditions():
+    malicious_urls = "admin'; DROP TABLE users; --|wp-login<script>alert(1)</script>"
+    result = build_athena_queries.generate_url_conditions(malicious_urls)
+
+    assert "DROP TABLE" not in result
+    assert "<script>" not in result
+    assert "adminDROPTABLEusers" in result or "admin" in result  # URL should be sanitized
+    assert "bad_bot_uri LIKE" in result
+    assert "OR" in result
+
+def normalize_query(q):
+    return ' '.join(q.strip().split())

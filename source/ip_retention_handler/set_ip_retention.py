@@ -6,14 +6,14 @@
 
 from os import environ, getenv
 from calendar import timegm
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from lib.dynamodb_util import DDB
-from aws_lambda_powertools import Logger
+from aws_lambda_powertools import Logger, Tracer
 
 logger = Logger(
     level=getenv('LOG_LEVEL')
 )
-
+tracer = Tracer()
 class SetIPRetention(object):
     """
     This class contains functions to put ip retention info into ddb table
@@ -76,7 +76,7 @@ class SetIPRetention(object):
             "IPAdressList": self.is_none(request_parameters.get('addresses',[])),
             "LockToken": self.is_none(str(request_parameters.get('lockToken'))),
             "IPRetentionPeriodMinute": ip_retention_period,
-            "CreationTime": timegm(datetime.utcnow().utctimetuple()),
+            "CreationTime": timegm(datetime.now(UTC).utctimetuple()),
             "ExpirationTime": self.get_expiration_time(event.get('eventTime'), ip_retention_period),
             "CreatedByUser": environ.get('STACK_NAME')
         }
@@ -110,7 +110,10 @@ class SetIPRetention(object):
 
         return response
 
-@logger.inject_lambda_context
+
+
+@tracer.capture_lambda_handler
+@logger.inject_lambda_context(log_event=True)
 def lambda_handler(event, _):
     """
     Invoke functions to put ip retention info into ddb table. 

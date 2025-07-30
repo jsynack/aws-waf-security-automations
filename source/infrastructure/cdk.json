@@ -1,0 +1,7 @@
+{
+  "app": "npx ts-node bin/aws-waf-security-automations.ts",
+  "context": {
+    "@aws-cdk/aws-s3:serverAccessLogsUseBucketPolicy": true
+  },
+  "versionReporting": false
+}

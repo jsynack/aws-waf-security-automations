@@ -18,6 +18,10 @@ class Context:
        self.invoked_function_arn = invoked_function_arn
        self.log_group_name = log_group_name
        self.log_stream_name = log_stream_name
+       self.function_name = 'test_function'
+       self.aws_request_id = '1234567890'
+       self.memory_limit_in_mb = 128
+       self.remaining_time_in_millis = 10000
 
 
 @pytest.fixture(scope="session")
